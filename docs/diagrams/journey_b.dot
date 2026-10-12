@@ -1,0 +1,23 @@
+digraph G { dpi=200; nodesep=0.5; ranksep=0.6; newrank=true; splines=true;
+ node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=15, color="#172A4D", fillcolor="#EDE7F6", fontcolor="#172A4D", penwidth=1.4, margin="0.18,0.14", width=2.1, height=0.8];
+ edge [color="#7657A6", arrowsize=0.9, penwidth=1.6];
+ {rank=same; b1; b2; b3}
+ b1 [label="Visitor\n(Home)", fillcolor="#172A4D", fontcolor="white"];
+ b2 [label="Store"];
+ b3 [label="Search / Filter\nProducts"];
+ b1 -> b2 -> b3;
+ {rank=same; b4; b5; b6}
+ b4 [label="Product\nDetail"];
+ b5 [label="Add to\nCart", fillcolor="#FFF6CC"];
+ b6 [label="Cart"];
+ b4 -> b5 -> b6;
+ {rank=same; b7; b8}
+ b7 [label="Checkout\nForm"];
+ b8 [label="Order Confirmed\n(demo dialog)", fillcolor="#F4D35E"];
+ b7 -> b8;
+ b1 -> b4 -> b7 [style=invis];
+ b2 -> b5 -> b8 [style=invis];
+ b3 -> b6 [style=invis];
+ b3:s -> b4:n [constraint=false];
+ b6:s -> b7:n [constraint=false];
+}

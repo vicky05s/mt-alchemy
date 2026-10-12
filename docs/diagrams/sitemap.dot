@@ -1,0 +1,42 @@
+digraph G {
+  rankdir=TB; nodesep=0.28; ranksep=0.55; dpi=200; bgcolor="white";
+  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, color="#172A4D", fillcolor="#FFFFFF", fontcolor="#172A4D", penwidth=1.4, margin="0.16,0.08"];
+  edge [color="#667085", arrowsize=0.7];
+
+  home [label="HOME\n(Top-level navigation)", fillcolor="#172A4D", fontcolor="white", fontsize=13];
+
+  about [label="About", fillcolor="#EDE7F6"];
+  services [label="Services", fillcolor="#EDE7F6"];
+  learn [label="Upskilling\n(Learn / Develop)", fillcolor="#EDE7F6"];
+  store [label="Store", fillcolor="#EDE7F6"];
+  insights [label="Insights", fillcolor="#EDE7F6"];
+  contact [label="Contact\n(Form)", fillcolor="#EDE7F6"];
+  auth [label="Login / Register\n(Forms)", fillcolor="#EDE7F6"];
+  cart [label="Cart", fillcolor="#EDE7F6"];
+
+  corp [label="Corporate Learning\n(Enquiry Form)", fillcolor="#FFF6CC"];
+  detail [label="Course Detail", fillcolor="#FFF6CC"];
+  player [label="Course Player", fillcolor="#FFF6CC"];
+  quiz [label="Assessment / Quiz", fillcolor="#FFF6CC"];
+  cert [label="Certificate", fillcolor="#FFF6CC"];
+  pdetail [label="Product Detail", fillcolor="#FFF6CC"];
+  checkout [label="Checkout\n(Form)", fillcolor="#FFF6CC"];
+
+  emp [label="Employer Dashboard\n(planned)", style="rounded,dashed", color="#7657A6", fontcolor="#7657A6"];
+  adm [label="Admin Portal\n(planned)", style="rounded,dashed", color="#7657A6", fontcolor="#7657A6"];
+
+  home -> {about services learn store insights contact auth cart};
+  services -> learn; services -> corp; services -> store;
+  learn -> detail -> player -> quiz -> cert;
+  store -> pdetail -> cart -> checkout;
+  store -> cart [style=invis];
+  auth -> emp [style=dashed, color="#7657A6"];
+  auth -> adm [style=dashed, color="#7657A6"];
+
+  subgraph cluster_leg { label="Legend"; fontname="Helvetica"; fontsize=10; color="#CBD5E1"; style=rounded;
+    l1 [label="Top-level navigation", fillcolor="#EDE7F6", fontsize=9];
+    l2 [label="Implemented in prototype", fillcolor="#FFF6CC", fontsize=9];
+    l3 [label="Planned (final project)", style="rounded,dashed", color="#7657A6", fontcolor="#7657A6", fontsize=9];
+    l1 -> l2 -> l3 [style=invis];
+  }
+}

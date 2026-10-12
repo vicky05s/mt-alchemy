@@ -1,0 +1,24 @@
+digraph G { dpi=200; nodesep=0.5; ranksep=0.6; newrank=true; splines=true;
+ node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=15, color="#172A4D", fillcolor="#EDE7F6", fontcolor="#172A4D", penwidth=1.4, margin="0.18,0.14", width=2.1, height=0.8];
+ edge [color="#7657A6", arrowsize=0.9, penwidth=1.6];
+ {rank=same; a1; a2; a3}
+ a1 [label="Visitor\n(Home)", fillcolor="#172A4D", fontcolor="white"];
+ a2 [label="Register\nForm"];
+ a3 [label="Login\nForm"];
+ a1 -> a2 -> a3;
+ {rank=same; a4; a5; a6}
+ a4 [label="Browse\nCourses"];
+ a5 [label="Course\nDetail"];
+ a6 [label="Enrol in\nCourse", fillcolor="#FFF6CC"];
+ a4 -> a5 -> a6;
+ {rank=same; a7; a8; a9}
+ a7 [label="Course\nPlayer"];
+ a8 [label="Assessment\n(Quiz)"];
+ a9 [label="Certificate", fillcolor="#F4D35E"];
+ a7 -> a8 -> a9;
+ a1 -> a4 -> a7 [style=invis];
+ a2 -> a5 -> a8 [style=invis];
+ a3 -> a6 -> a9 [style=invis];
+ a3:s -> a4:n [constraint=false];
+ a6:s -> a7:n [constraint=false];
+}

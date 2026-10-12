@@ -1,0 +1,18 @@
+digraph G { dpi=200; nodesep=0.5; ranksep=0.6; newrank=true; splines=true;
+ node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=15, color="#172A4D", fillcolor="#EDE7F6", fontcolor="#172A4D", penwidth=1.4, margin="0.18,0.14", width=2.1, height=0.8];
+ edge [color="#7657A6", arrowsize=0.9, penwidth=1.6];
+ {rank=same; c1; c2; c3}
+ c1 [label="HR / Employer\n(Services)", fillcolor="#172A4D", fontcolor="white"];
+ c2 [label="Corporate Learning\nEnquiry Form", fillcolor="#FFF6CC"];
+ c3 [label="Register\nOrganisation", style="rounded,dashed,filled", color="#7657A6"];
+ c1 -> c2 -> c3;
+ {rank=same; c4; c5; c6}
+ c4 [label="Add\nEmployees", style="rounded,dashed,filled", color="#7657A6"];
+ c5 [label="Assign\nCourse", style="rounded,dashed,filled", color="#7657A6"];
+ c6 [label="View\nProgress", style="rounded,dashed,filled", color="#7657A6"];
+ c4 -> c5 -> c6;
+ c1 -> c4 [style=invis];
+ c2 -> c5 [style=invis];
+ c3 -> c6 [style=invis];
+ c3:s -> c4:n [constraint=false];
+}
