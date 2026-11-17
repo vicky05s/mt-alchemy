@@ -1,217 +1,180 @@
-
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../auth/auth_provider.dart';
+import '../auth/auth_widgets.dart';
 import '../theme/app_theme.dart';
 import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
-const LoginScreen({super.key});
+  const LoginScreen({super.key});
 
-@override
-State<LoginScreen> createState() => _LoginScreenState();
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-final _formKey = GlobalKey<FormState>();
-final _emailController = TextEditingController();
-final _passwordController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  final _email = TextEditingController();
+  final _password = TextEditingController();
+  bool _hidePassword = true;
 
-bool _hidePassword = true;
+  @override
+  void dispose() {
+    _email.dispose();
+    _password.dispose();
+    super.dispose();
+  }
 
-@override
-void dispose() {
-_emailController.dispose();
-_passwordController.dispose();
-super.dispose();
-}
+  Future<void> _signIn() async {
+    FocusScope.of(context).unfocus();
+    final auth = context.read<AuthProvider>();
+    auth.clearError();
+    if (!_formKey.currentState!.validate()) return;
 
-void _signIn() {
-FocusScope.of(context).unfocus();
+    final ok = await auth.login(_email.text, _password.text);
+    if (!mounted || !ok) return;
 
-if (_formKey.currentState!.validate()) {
-ScaffoldMessenger.of(context).showSnackBar(
-const SnackBar(
-content: Text(
-'Demo sign in successful! No account was verified.',
-),
-),
-);
-}
-}
+    final messenger = ScaffoldMessenger.of(context);
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    messenger.showSnackBar(
+      SnackBar(content: Text('Login Success. Welcome back, ${auth.user?.name ?? ''}!')),
+    );
+  }
 
-@override
-Widget build(BuildContext context) {
-return Scaffold(
-backgroundColor: AppTheme.background,
-appBar: AppBar(
-title: const Text('Sign In'),
-backgroundColor: AppTheme.background,
-foregroundColor: AppTheme.deepBlue,
-),
-body: Center(
-child: SingleChildScrollView(
-padding: const EdgeInsets.all(24),
-child: ConstrainedBox(
-constraints: const BoxConstraints(maxWidth: 480),
-child: Container(
-padding: const EdgeInsets.all(28),
-decoration: BoxDecoration(
-color: Colors.white,
-borderRadius: BorderRadius.circular(24),
-border: Border.all(
-color: const Color(0xFFE4E0E9),
-),
-),
-child: Form(
-key: _formKey,
-child: Column(
-crossAxisAlignment: CrossAxisAlignment.stretch,
-children: [
-const Icon(
-Icons.auto_awesome_rounded,
-color: AppTheme.purple,
-size: 42,
-),
-const SizedBox(height: 16),
-const Text(
-'Welcome Back',
-textAlign: TextAlign.center,
-style: TextStyle(
-color: AppTheme.deepBlue,
-fontSize: 28,
-fontWeight: FontWeight.w800,
-),
-),
-const SizedBox(height: 8),
-const Text(
-'Sign in to continue your learning journey.',
-textAlign: TextAlign.center,
-style: TextStyle(
-color: AppTheme.greyText,
-),
-),
-const SizedBox(height: 28),
+  Future<void> _forgotPassword() async {
+    final controller = TextEditingController(text: _email.text.trim());
+    final email = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reset your password'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text("Enter your email and we'll send you a reset link."),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.emailAddress,
+              decoration: authInput('Email', icon: Icons.mail_outline),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Send link'),
+          ),
+        ],
+      ),
+    );
+    if (email == null || email.isEmpty || !mounted) return;
 
-const Text(
-'Email Address',
-style: TextStyle(
-fontWeight: FontWeight.w600,
-),
-),
-const SizedBox(height: 8),
-TextFormField(
-controller: _emailController,
-keyboardType: TextInputType.emailAddress,
-decoration: const InputDecoration(
-hintText: 'Enter your email',
-prefixIcon: Icon(Icons.email_outlined),
-border: OutlineInputBorder(),
-),
-validator: (value) {
-if (value == null || value.trim().isEmpty) {
-return 'Please enter your email address';
-}
-if (!RegExp(
-r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
-).hasMatch(value.trim())) {
-return 'Please enter a valid email address';
-}
-return null;
-},
-),
-const SizedBox(height: 20),
+    final auth = context.read<AuthProvider>();
+    final ok = await auth.resetPassword(email);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok
+            ? 'If an account exists for $email, a reset link has been sent.'
+            : (auth.error ?? 'Could not send the reset email.')),
+      ),
+    );
+  }
 
-const Text(
-'Password',
-style: TextStyle(
-fontWeight: FontWeight.w600,
-),
-),
-const SizedBox(height: 8),
-TextFormField(
-controller: _passwordController,
-obscureText: _hidePassword,
-decoration: InputDecoration(
-hintText: 'Enter your password',
-prefixIcon: const Icon(Icons.lock_outline),
-border: const OutlineInputBorder(),
-suffixIcon: IconButton(
-onPressed: () {
-setState(() {
-_hidePassword = !_hidePassword;
-});
-},
-icon: Icon(
-_hidePassword
-? Icons.visibility_outlined
-    : Icons.visibility_off_outlined,
-),
-),
-),
-validator: (value) {
-if (value == null || value.isEmpty) {
-return 'Please enter your password';
-}
-return null;
-},
-),
-const SizedBox(height: 12),
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.watch<AuthProvider>();
 
-Align(
-alignment: Alignment.centerRight,
-child: TextButton(
-onPressed: () {
-ScaffoldMessenger.of(context).showSnackBar(
-const SnackBar(
-content: Text(
-'Password recovery is a prototype placeholder.',
-),
-),
-);
-},
-child: const Text('Forgot password?'),
-),
-),
-const SizedBox(height: 12),
-
-SizedBox(
-height: 50,
-child: ElevatedButton(
-onPressed: _signIn,
-style: ElevatedButton.styleFrom(
-backgroundColor: AppTheme.deepBlue,
-foregroundColor: Colors.white,
-),
-child: const Text('Sign In'),
-),
-),
-const SizedBox(height: 18),
-
-Row(
-mainAxisAlignment: MainAxisAlignment.center,
-children: [
-const Flexible(
-child: Text("Don't have an account? "),
-),
-TextButton(
-onPressed: () {
-Navigator.push(
-context,
-MaterialPageRoute(
-builder: (_) => const RegisterScreen(),
-),
-);
-},
-child: const Text('Register'),
-),
-],
-),
-],
-),
-),
-),
-),
-),
-),
-);
-}
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      appBar: AppBar(
+        title: const Text('Sign In'),
+        backgroundColor: AppTheme.background,
+        foregroundColor: AppTheme.deepBlue,
+      ),
+      body: AuthCard(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const AuthHeader(
+                title: 'Welcome Back',
+                subtitle:
+                'Sign in to continue your learning, manage your team or shop.',
+              ),
+              const SizedBox(height: 18),
+              if (auth.error != null) ...[
+                ErrorBanner(auth.error!),
+                const SizedBox(height: 16),
+              ],
+              TextFormField(
+                controller: _email,
+                keyboardType: TextInputType.emailAddress,
+                autofillHints: const [AutofillHints.email],
+                textInputAction: TextInputAction.next,
+                decoration: authInput('Email', icon: Icons.mail_outline),
+                validator: Validators.email,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _password,
+                obscureText: _hidePassword,
+                autofillHints: const [AutofillHints.password],
+                textInputAction: TextInputAction.done,
+                onFieldSubmitted: (_) => _signIn(),
+                decoration: authInput(
+                  'Password',
+                  icon: Icons.lock_outline,
+                  suffix: IconButton(
+                    icon: Icon(_hidePassword
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined),
+                    onPressed: () =>
+                        setState(() => _hidePassword = !_hidePassword),
+                  ),
+                ),
+                validator: (v) =>
+                (v == null || v.isEmpty) ? 'Password is required' : null,
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                  onPressed: _forgotPassword,
+                  child: const Text('Forgot password?'),
+                ),
+              ),
+              const SizedBox(height: 4),
+              AuthSubmitButton(
+                label: 'Sign In',
+                busy: auth.busy,
+                onPressed: _signIn,
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text("Don't have an account?"),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pushReplacement(
+                      MaterialPageRoute(
+                          builder: (_) => const RegisterScreen()),
+                    ),
+                    child: const Text('Sign Up'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

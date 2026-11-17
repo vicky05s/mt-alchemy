@@ -1,48 +1,153 @@
 import 'package:flutter/material.dart';
-import '../theme/app_theme.dart';
-import 'courses_screen.dart';
-import 'store_screen.dart';
-import 'corporate_screen.dart';
-import 'contact_screen.dart';
 
+import '../content/site_content.dart';
+import '../theme/app_theme.dart';
+import '../widgets/page_sections.dart';
+import 'individual_coaching_screen.dart';
+import 'organizations_screen.dart';
+
+/// Services directory (brief Page 3): six categories, each with a write-up,
+/// who it is for, key objectives and an Enquiry button.
 class ServicesScreen extends StatelessWidget {
   const ServicesScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Our Services')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(22),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1050),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _hero(),
-              const SizedBox(height: 28),
-              const Text('Ways we support growth', style: TextStyle(fontSize: 27, fontWeight: FontWeight.w800, color: AppTheme.deepBlue)),
-              const SizedBox(height: 16),
-              LayoutBuilder(builder: (context, c) {
-                final count = c.maxWidth > 760 ? 3 : c.maxWidth > 500 ? 2 : 1;
-                final items = [
-                  _ServiceData(Icons.school_outlined, 'Learning & Development', 'Explore learning paths and practical courses.', () => _go(context, const CoursesScreen())),
-                  _ServiceData(Icons.groups_outlined, 'Corporate Learning', 'Plan employee learning and team development.', () => _go(context, const CorporateScreen())),
-                  _ServiceData(Icons.menu_book_outlined, 'Learning Resources', 'Browse workbooks, guides and digital resources.', () => _go(context, const StoreScreen())),
-                ];
-                return GridView.count(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), crossAxisCount: count, crossAxisSpacing: 16, mainAxisSpacing: 16, childAspectRatio: count == 1 ? 2.0 : 1.05, children: items.map((e) => _serviceCard(context, e)).toList());
-              }),
-              const SizedBox(height: 26),
-              Container(width: double.infinity, padding: const EdgeInsets.all(24), decoration: BoxDecoration(color: const Color(0xFFE9E0F5), borderRadius: BorderRadius.circular(22)), child: Wrap(alignment: WrapAlignment.spaceBetween, crossAxisAlignment: WrapCrossAlignment.center, spacing: 18, runSpacing: 14, children: [const SizedBox(width: 430, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Need help choosing?', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.deepBlue)), SizedBox(height: 7), Text('Tell us what you or your organisation would like to develop.') ])), _compactButton('Contact Us', () => _go(context, const ContactScreen()))])),
-            ]),
+    return PageShell(
+      children: [
+        PageHero(
+          eyebrow: 'MT ALCHEMY SERVICES',
+          title: 'Learning that moves people forward.',
+          subtitle:
+              'Explore how MT Alchemy supports individuals, teams and organisations.',
+          actions: [
+            heroButton('Get a Free Consultation', () => openEnquiry(
+                  context,
+                  type: 'Corporate Training',
+                  service: 'Free consultation',
+                  message: 'I would like a free consultation.',
+                  source: 'services',
+                )),
+          ],
+        ),
+        const SectionHeading(eyebrow: 'Who it is for', title: 'Choose your path'),
+        ResponsiveGrid(
+          maxColumns: 2,
+          children: [
+            FeatureCard(
+              icon: Icons.person_outline,
+              title: 'For Individuals',
+              text: 'One-to-one coaching for career, relationships and personal growth.',
+              onTap: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const IndividualCoachingScreen())),
+            ),
+            FeatureCard(
+              icon: Icons.business_outlined,
+              title: 'For Organizations',
+              text: 'Build emotionally intelligent leaders and resilient workplace cultures.',
+              onTap: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const OrganizationsScreen())),
+            ),
+          ],
+        ),
+        const SectionHeading(
+          eyebrow: 'Service directory',
+          title: 'What we offer',
+          subtitle: 'Tap a service to see who it is for and what it covers.',
+        ),
+        for (final s in serviceCategories) _ServiceTile(service: s),
+        CtaBand(
+          title: 'Need help choosing?',
+          text: 'Tell us what you or your organisation would like to develop and we will guide you.',
+          label: 'Get a Free Consultation',
+          onPressed: () => openEnquiry(
+            context,
+            type: 'Corporate Training',
+            service: 'Free consultation',
+            source: 'services',
           ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ServiceTile extends StatelessWidget {
+  final ServiceCategory service;
+  const _ServiceTile({required this.service});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+          childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+          expandedCrossAxisAlignment: CrossAxisAlignment.start,
+          leading: Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              color: AppTheme.purple.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(service.icon, color: AppTheme.purple),
+          ),
+          title: Text(service.title,
+              style: const TextStyle(
+                  color: AppTheme.deepBlue,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 17)),
+          subtitle: Text(service.summary,
+              style: const TextStyle(color: AppTheme.greyText, height: 1.4)),
+          children: [
+            const Text('Who it is for',
+                style: TextStyle(fontWeight: FontWeight.w800)),
+            const SizedBox(height: 4),
+            Text(service.audience,
+                style: const TextStyle(color: AppTheme.greyText, height: 1.5)),
+            const SizedBox(height: 14),
+            const Text('Key objectives',
+                style: TextStyle(fontWeight: FontWeight.w800)),
+            const SizedBox(height: 6),
+            for (final o in service.objectives)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.check_circle_rounded,
+                        size: 18, color: AppTheme.purple),
+                    const SizedBox(width: 8),
+                    Expanded(
+                        child: Text(o,
+                            style: const TextStyle(
+                                color: AppTheme.greyText, height: 1.4))),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 14),
+            ElevatedButton.icon(
+              onPressed: () => openEnquiry(
+                context,
+                type: service.enquiryType,
+                service: service.title,
+                message: 'I would like to enquire about: ${service.title}.',
+                source: 'services',
+              ),
+              icon: const Icon(Icons.mail_outline, size: 18),
+              label: const Text('Enquire about this service'),
+            ),
+          ],
         ),
       ),
     );
   }
-
-  Widget _hero() => Container(width: double.infinity, padding: const EdgeInsets.all(30), decoration: BoxDecoration(color: AppTheme.deepBlue, borderRadius: BorderRadius.circular(26)), child: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('MT ALCHEMY SERVICES', style: TextStyle(color: AppTheme.softYellow, letterSpacing: 1.5, fontWeight: FontWeight.bold)), SizedBox(height: 14), Text('Learning that moves people forward.', style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w800, height: 1.15)), SizedBox(height: 12), Text('Discover learning experiences and resources for individuals, teams and organisations.', style: TextStyle(color: Colors.white70, fontSize: 16, height: 1.6))]));
-  Widget _serviceCard(BuildContext context, _ServiceData data) => Container(padding: const EdgeInsets.all(20), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFFE5E7EB))), child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [Icon(data.icon, size: 32, color: AppTheme.purple), const SizedBox(height: 14), Text(data.title, style: const TextStyle(color: AppTheme.deepBlue, fontSize: 18, fontWeight: FontWeight.bold)), const SizedBox(height: 8), Text(data.description, style: const TextStyle(color: AppTheme.greyText, height: 1.5)), const SizedBox(height: 14), Align(alignment: Alignment.centerLeft, child: _compactButton('Explore', data.onTap))]));
-  Widget _compactButton(String text, VoidCallback action) => ElevatedButton(onPressed: action, style: ElevatedButton.styleFrom(backgroundColor: AppTheme.deepBlue, foregroundColor: Colors.white, minimumSize: const Size(0, 0), tapTargetSize: MaterialTapTargetSize.shrinkWrap, padding: const EdgeInsets.symmetric(horizontal: 17, vertical: 12)), child: Text(text));
-  void _go(BuildContext context, Widget page) => Navigator.push(context, MaterialPageRoute(builder: (_) => page));
 }
-class _ServiceData { final IconData icon; final String title; final String description; final VoidCallback onTap; _ServiceData(this.icon, this.title, this.description, this.onTap); }

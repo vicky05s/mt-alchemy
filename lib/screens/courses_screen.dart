@@ -1,16 +1,91 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../auth/app_user.dart';
+import '../auth/auth_provider.dart';
+import '../learning/course_models.dart';
+import '../learning/course_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/main_app_bar.dart';
 import 'course_detail_screen.dart';
 
-class CoursesScreen extends StatelessWidget {
+/// Learning Hub: lists published courses from Firestore.
+class CoursesScreen extends StatefulWidget {
   const CoursesScreen({super.key});
 
   @override
+  State<CoursesScreen> createState() => _CoursesScreenState();
+}
+
+class _CoursesScreenState extends State<CoursesScreen> {
+  static const _categories = [
+    'All Courses',
+    'Leadership',
+    'People Skills',
+    'Team Engagement',
+    'Well-being',
+  ];
+
+  final _search = TextEditingController();
+  late final Stream<List<Course>> _courses;
+  String _category = 'All Courses';
+  bool _seeding = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _courses = CourseService.instance.publishedCourses();
+  }
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  void _openCourse(Course c) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => CourseDetailScreen(courseId: c.id)),
+    );
+  }
+
+  Future<void> _loadSamples() async {
+    setState(() => _seeding = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await CourseService.instance.loadSampleCourses();
+      messenger.showSnackBar(
+          const SnackBar(content: Text('Sample courses loaded.')));
+    } catch (e) {
+      debugPrint('Seeding failed: $e');
+      messenger.showSnackBar(const SnackBar(
+          content: Text('Could not load courses. Are you logged in as admin?')));
+    }
+    if (mounted) setState(() => _seeding = false);
+  }
+
+  List<Course> _filter(List<Course> all) {
+    final q = _search.text.trim().toLowerCase();
+    return all.where((c) {
+      final matchesCat = _category == 'All Courses' || c.category == _category;
+      final matchesText = q.isEmpty ||
+          c.title.toLowerCase().contains(q) ||
+          c.description.toLowerCase().contains(q) ||
+          c.category.toLowerCase().contains(q);
+      return matchesCat && matchesText;
+    }).toList();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final isStaff = context
+        .watch<AuthProvider>()
+        .hasRole([UserRole.admin, UserRole.trainer]);
+
     return Scaffold(
       backgroundColor: const Color(0xFFF7F6F9),
-      appBar: _appBar(context),
+      appBar: const MainAppBar(),
       body: LayoutBuilder(
         builder: (context, constraints) {
           final desktop = constraints.maxWidth >= 900;
@@ -23,22 +98,68 @@ class CoursesScreen extends StatelessWidget {
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 1250),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _header(desktop),
-                    const SizedBox(height: 24),
-                    _searchBar(),
-                    const SizedBox(height: 18),
-                    _categoryFilters(),
-                    const SizedBox(height: 28),
-                    _featuredCourse(context, desktop),
-                    const SizedBox(height: 36),
-                    _sectionHeader(),
-                    const SizedBox(height: 18),
-                    _courseGrid(context, desktop),
-                    const SizedBox(height: 40),
-                  ],
+                child: StreamBuilder<List<Course>>(
+                  stream: _courses,
+                  builder: (context, snap) {
+                    final all = snap.data ?? const <Course>[];
+                    final filtered = _filter(all);
+                    final showFeatured = _category == 'All Courses' &&
+                        _search.text.trim().isEmpty &&
+                        filtered.isNotEmpty;
+                    final featured = showFeatured
+                        ? filtered.firstWhere((c) => c.featured,
+                            orElse: () => filtered.first)
+                        : null;
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _header(desktop),
+                        const SizedBox(height: 24),
+                        _searchBar(),
+                        const SizedBox(height: 18),
+                        _categoryFilters(),
+                        const SizedBox(height: 28),
+                        if (snap.connectionState == ConnectionState.waiting)
+                          const Padding(
+                            padding: EdgeInsets.all(40),
+                            child: Center(child: CircularProgressIndicator()),
+                          )
+                        else if (snap.hasError)
+                          _message(
+                            Icons.error_outline,
+                            'Courses could not be loaded. Check your connection and that the Firestore rules are published.',
+                          )
+                        else if (all.isEmpty)
+                          _emptyCatalogue(isStaff)
+                        else ...[
+                          if (featured != null) ...[
+                            _featuredCourse(featured, desktop),
+                            const SizedBox(height: 36),
+                          ],
+                          _sectionHeader(filtered.length),
+                          if (isStaff)
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton.icon(
+                                onPressed: _seeding ? null : _loadSamples,
+                                icon: const Icon(Icons.refresh_rounded, size: 18),
+                                label: Text(_seeding
+                                    ? 'Reloading…'
+                                    : 'Staff: reload sample courses'),
+                              ),
+                            ),
+                          const SizedBox(height: 18),
+                          if (filtered.isEmpty)
+                            _message(Icons.search_off_rounded,
+                                'No courses match your search. Try another keyword or category.')
+                          else
+                            _courseGrid(filtered, desktop),
+                        ],
+                        const SizedBox(height: 40),
+                      ],
+                    );
+                  },
                 ),
               ),
             ),
@@ -48,53 +169,60 @@ class CoursesScreen extends StatelessWidget {
     );
   }
 
-  PreferredSizeWidget _appBar(BuildContext context) {
-    return AppBar(
-      backgroundColor: const Color(0xFFF7F6F9),
-      elevation: 0,
-      titleSpacing: 24,
-      leading: IconButton(
-        onPressed: () {
-          Navigator.pop(context);
-        },
-        icon: const Icon(Icons.arrow_back_rounded),
+  Widget _message(IconData icon, String text) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(30),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFFE4E0E9)),
       ),
-      title: Row(
+      child: Column(
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppTheme.deepBlue,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(
-              Icons.auto_awesome_rounded,
-              color: AppTheme.softYellow,
-            ),
-          ),
-          const SizedBox(width: 11),
-          const Text(
-            'MT Alchemy',
-            style: TextStyle(
-              color: AppTheme.darkText,
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
+          Icon(icon, size: 36, color: AppTheme.purple),
+          const SizedBox(height: 10),
+          Text(text,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppTheme.greyText, height: 1.5)),
         ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () {},
-          child: const Text('Learning Hub'),
-        ),
-        IconButton(
-          onPressed: () {},
-          icon: const Icon(Icons.shopping_bag_outlined),
-        ),
-        const SizedBox(width: 12),
-      ],
+    );
+  }
+
+  Widget _emptyCatalogue(bool isStaff) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(30),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFFE4E0E9)),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.school_outlined, size: 40, color: AppTheme.purple),
+          const SizedBox(height: 10),
+          const Text('No courses published yet.',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 6),
+          Text(
+            isStaff
+                ? 'You are signed in as staff. Load the sample courses to get started.'
+                : 'Please check back soon.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppTheme.greyText),
+          ),
+          if (isStaff) ...[
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: _seeding ? null : _loadSamples,
+              icon: const Icon(Icons.download_rounded),
+              label: Text(_seeding ? 'Loading…' : 'Load sample courses'),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -114,20 +242,20 @@ class CoursesScreen extends StatelessWidget {
       ),
       child: desktop
           ? Row(
-        children: [
-          Expanded(child: _headerText()),
-          const SizedBox(width: 30),
-          _headerIcon(),
-        ],
-      )
+              children: [
+                Expanded(child: _headerText()),
+                const SizedBox(width: 30),
+                _headerIcon(),
+              ],
+            )
           : Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _headerText(),
-          const SizedBox(height: 22),
-          _headerIcon(),
-        ],
-      ),
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _headerText(),
+                const SizedBox(height: 22),
+                _headerIcon(),
+              ],
+            ),
     );
   }
 
@@ -136,10 +264,7 @@ class CoursesScreen extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 7,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
           decoration: BoxDecoration(
             color: AppTheme.softYellow,
             borderRadius: BorderRadius.circular(30),
@@ -156,7 +281,7 @@ class CoursesScreen extends StatelessWidget {
         ),
         const SizedBox(height: 18),
         const Text(
-          'Learn something\nthat moves you forward.',
+          'Learn. Apply. Grow.',
           style: TextStyle(
             color: Colors.white,
             fontSize: 34,
@@ -168,11 +293,7 @@ class CoursesScreen extends StatelessWidget {
         const SizedBox(height: 12),
         const Text(
           'Explore practical learning experiences designed to turn insight into practice, behaviour and impact.',
-          style: TextStyle(
-            color: Colors.white70,
-            fontSize: 14,
-            height: 1.55,
-          ),
+          style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.55),
         ),
       ],
     );
@@ -197,11 +318,8 @@ class CoursesScreen extends StatelessWidget {
             shape: BoxShape.circle,
             color: AppTheme.purple.withValues(alpha: 0.28),
           ),
-          child: const Icon(
-            Icons.school_rounded,
-            color: AppTheme.softYellow,
-            size: 45,
-          ),
+          child: const Icon(Icons.school_rounded,
+              color: AppTheme.softYellow, size: 45),
         ),
       ),
     );
@@ -209,82 +327,69 @@ class CoursesScreen extends StatelessWidget {
 
   Widget _searchBar() {
     return TextField(
+      controller: _search,
+      onChanged: (_) => setState(() {}),
       decoration: InputDecoration(
         hintText: 'Search courses, skills or topics...',
         prefixIcon: const Icon(Icons.search_rounded),
-        suffixIcon: IconButton(
-          onPressed: () {},
-          icon: const Icon(Icons.tune_rounded),
-        ),
+        suffixIcon: _search.text.isEmpty
+            ? null
+            : IconButton(
+                onPressed: () {
+                  _search.clear();
+                  setState(() {});
+                },
+                icon: const Icon(Icons.close_rounded),
+              ),
       ),
     );
   }
 
   Widget _categoryFilters() {
-    final categories = [
-      'All Courses',
-      'Leadership',
-      'People Skills',
-      'Team Engagement',
-      'Well-being',
-    ];
-
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
-        children: List.generate(
-          categories.length,
-              (index) {
-            final selected = index == 0;
-
-            return Padding(
+        children: [
+          for (final c in _categories)
+            Padding(
               padding: const EdgeInsets.only(right: 9),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 17,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: selected
-                      ? AppTheme.deepBlue
-                      : Colors.white,
-                  borderRadius: BorderRadius.circular(30),
-                  border: Border.all(
-                    color: selected
-                        ? AppTheme.deepBlue
-                        : const Color(0xFFE4E0E9),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(30),
+                onTap: () => setState(() => _category = c),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 17, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: _category == c ? AppTheme.deepBlue : Colors.white,
+                    borderRadius: BorderRadius.circular(30),
+                    border: Border.all(
+                      color: _category == c
+                          ? AppTheme.deepBlue
+                          : const Color(0xFFE4E0E9),
+                    ),
                   ),
-                ),
-                child: Text(
-                  categories[index],
-                  style: TextStyle(
-                    color: selected
-                        ? Colors.white
-                        : AppTheme.darkText,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
+                  child: Text(
+                    c,
+                    style: TextStyle(
+                      color:
+                          _category == c ? Colors.white : AppTheme.darkText,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ),
-            );
-          },
-        ),
+            ),
+        ],
       ),
     );
   }
 
-  Widget _featuredCourse(BuildContext context, bool desktop) {
+  Widget _featuredCourse(Course course, bool desktop) {
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const CourseDetailScreen(),
-            ),
-          );
-        },
+        onTap: () => _openCourse(course),
         child: Container(
           height: desktop ? 330 : 430,
           clipBehavior: Clip.antiAlias,
@@ -302,10 +407,10 @@ class CoursesScreen extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              Image.asset(
-                'assets/images/leadership_discussion.png',
-                fit: BoxFit.cover,
-              ),
+              Image.asset(course.image,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) =>
+                      Container(color: AppTheme.deepBlue)),
               Container(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
@@ -324,54 +429,48 @@ class CoursesScreen extends StatelessWidget {
                 child: Align(
                   alignment: Alignment.bottomLeft,
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      maxWidth: 600,
-                    ),
+                    constraints: const BoxConstraints(maxWidth: 600),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _smallPill('FEATURED COURSE'),
                         const SizedBox(height: 12),
-                        const Text(
-                          'Leadership\nDevelopment',
-                          style: TextStyle(
+                        Text(
+                          course.title,
+                          style: const TextStyle(
                             color: Colors.white,
                             fontSize: 34,
-                            height: 0.98,
+                            height: 1.0,
                             fontWeight: FontWeight.w800,
                             letterSpacing: -1,
                           ),
                         ),
                         const SizedBox(height: 10),
-                        const Text(
-                          'Build confident leadership habits, communicate with clarity and create stronger teams.',
-                          style: TextStyle(
+                        Text(
+                          course.description,
+                          style: const TextStyle(
                             color: Colors.white70,
                             fontSize: 13,
                             height: 1.5,
                           ),
                         ),
                         const SizedBox(height: 16),
-                        Row(
+                        Wrap(
+                          spacing: 16,
+                          runSpacing: 6,
                           children: [
-                            _courseMeta(
-                              Icons.menu_book_rounded,
-                              '6 modules',
-                            ),
-                            const SizedBox(width: 16),
-                            _courseMeta(
-                              Icons.schedule_rounded,
-                              'Self-paced',
-                            ),
+                            _courseMeta(Icons.menu_book_rounded,
+                                '${course.moduleCount} modules'),
+                            _courseMeta(Icons.schedule_rounded,
+                                '${course.durationHours.toStringAsFixed(course.durationHours % 1 == 0 ? 0 : 1)} hrs'),
+                            _courseMeta(Icons.sell_outlined, course.priceLabel),
                           ],
                         ),
                         const SizedBox(height: 16),
                         Container(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 11,
-                          ),
+                              horizontal: 16, vertical: 11),
                           decoration: BoxDecoration(
                             color: AppTheme.softYellow,
                             borderRadius: BorderRadius.circular(13),
@@ -380,7 +479,7 @@ class CoursesScreen extends StatelessWidget {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Text(
-                                'Explore Course',
+                                'View Course',
                                 style: TextStyle(
                                   color: AppTheme.deepBlue,
                                   fontSize: 12,
@@ -388,11 +487,8 @@ class CoursesScreen extends StatelessWidget {
                                 ),
                               ),
                               SizedBox(width: 7),
-                              Icon(
-                                Icons.arrow_forward_rounded,
-                                color: AppTheme.deepBlue,
-                                size: 17,
-                              ),
+                              Icon(Icons.arrow_forward_rounded,
+                                  color: AppTheme.deepBlue, size: 17),
                             ],
                           ),
                         ),
@@ -410,10 +506,7 @@ class CoursesScreen extends StatelessWidget {
 
   Widget _smallPill(String text) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 11,
-        vertical: 7,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
       decoration: BoxDecoration(
         color: AppTheme.softYellow,
         borderRadius: BorderRadius.circular(30),
@@ -434,11 +527,7 @@ class CoursesScreen extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(
-          icon,
-          color: Colors.white70,
-          size: 15,
-        ),
+        Icon(icon, color: Colors.white70, size: 15),
         const SizedBox(width: 5),
         Text(
           text,
@@ -452,11 +541,11 @@ class CoursesScreen extends StatelessWidget {
     );
   }
 
-  Widget _sectionHeader() {
-    return const Column(
+  Widget _sectionHeader(int count) {
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
+        const Text(
           'EXPLORE LEARNING',
           style: TextStyle(
             color: AppTheme.purple,
@@ -465,8 +554,8 @@ class CoursesScreen extends StatelessWidget {
             letterSpacing: 1.2,
           ),
         ),
-        SizedBox(height: 6),
-        Text(
+        const SizedBox(height: 6),
+        const Text(
           'Develop what matters.',
           style: TextStyle(
             color: AppTheme.darkText,
@@ -475,127 +564,61 @@ class CoursesScreen extends StatelessWidget {
             letterSpacing: -0.5,
           ),
         ),
-        SizedBox(height: 5),
+        const SizedBox(height: 5),
         Text(
-          'Choose a learning experience that fits your development journey.',
-          style: TextStyle(
-            color: AppTheme.greyText,
-            fontSize: 13,
-          ),
+          '$count ${count == 1 ? 'course' : 'courses'} to choose from.',
+          style: const TextStyle(color: AppTheme.greyText, fontSize: 13),
         ),
       ],
     );
   }
 
-  Widget _courseGrid(BuildContext context, bool desktop) {
-    final courses = [
-      _CourseData(
-        title: 'Emotional Intelligence',
-        category: 'PEOPLE SKILLS',
-        description:
-        'Understand yourself, connect with others and lead with awareness.',
-        image: 'assets/images/team_collaboration.png',
-        accent: AppTheme.purple,
-        modules: '5 modules',
-      ),
-      _CourseData(
-        title: 'Leadership Development',
-        category: 'LEADERSHIP',
-        description:
-        'Build practical leadership habits for real workplace situations.',
-        image: 'assets/images/leadership_discussion.png',
-        accent: AppTheme.deepBlue,
-        modules: '6 modules',
-      ),
-      _CourseData(
-        title: 'Team Engagement',
-        category: 'TEAM DEVELOPMENT',
-        description:
-        'Create connected, motivated and collaborative teams.',
-        image: 'assets/images/upskilling_workspace.png',
-        accent: AppTheme.softYellow,
-        modules: '4 modules',
-        darkText: true,
-      ),
-      _CourseData(
-        title: 'Workplace Well-being',
-        category: 'WELL-BEING',
-        description:
-        'Build healthier habits and create a more supportive workplace.',
-        image: 'assets/images/hero_office.png',
-        accent: const Color(0xFF4C7A6B),
-        modules: '4 modules',
-      ),
-    ];
-
+  Widget _courseGrid(List<Course> courses, bool desktop) {
     if (desktop) {
       return GridView.builder(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
         itemCount: courses.length,
-        gridDelegate:
-        const SliverGridDelegateWithFixedCrossAxisCount(
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 2,
           crossAxisSpacing: 16,
           mainAxisSpacing: 16,
           childAspectRatio: 1.35,
         ),
-        itemBuilder: (context, index) {
-          return _courseCard(
-            context,
-            courses[index],
-          );
-        },
+        itemBuilder: (context, i) => _courseCard(courses[i]),
       );
     }
-
     return Column(
-      children: courses
-          .map(
-            (course) => Padding(
-          padding: const EdgeInsets.only(bottom: 14),
-          child: _courseCard(
-            context,
-            course,
+      children: [
+        for (final c in courses)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 14),
+            child: _courseCard(c),
           ),
-        ),
-      )
-          .toList(),
+      ],
     );
   }
 
-  Widget _courseCard(
-      BuildContext context,
-      _CourseData course,
-      ) {
-    final titleColor =
-    course.darkText ? AppTheme.deepBlue : Colors.white;
-
+  Widget _courseCard(Course course) {
+    final titleColor = course.darkText ? AppTheme.deepBlue : Colors.white;
     final descriptionColor = course.darkText
         ? AppTheme.deepBlue.withValues(alpha: 0.78)
         : Colors.white.withValues(alpha: 0.78);
+    final accent = course.accentColor;
 
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const CourseDetailScreen(),
-            ),
-          );
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
+        onTap: () => _openCourse(course),
+        child: Container(
           height: 285,
           clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(25),
-            color: course.accent,
+            color: accent,
             boxShadow: [
               BoxShadow(
-                color: course.accent.withValues(alpha: 0.10),
+                color: accent.withValues(alpha: 0.10),
                 blurRadius: 18,
                 offset: const Offset(0, 8),
               ),
@@ -604,10 +627,9 @@ class CoursesScreen extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              Image.asset(
-                course.image,
-                fit: BoxFit.cover,
-              ),
+              Image.asset(course.image,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Container(color: accent)),
               Container(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
@@ -615,48 +637,60 @@ class CoursesScreen extends StatelessWidget {
                     end: Alignment.bottomCenter,
                     colors: course.darkText
                         ? [
-                      Colors.transparent,
-                      AppTheme.softYellow
-                          .withValues(alpha: 0.92),
-                    ]
+                            Colors.transparent,
+                            AppTheme.softYellow.withValues(alpha: 0.92),
+                          ]
                         : [
-                      Colors.transparent,
-                      course.accent
-                          .withValues(alpha: 0.94),
-                    ],
+                            Colors.transparent,
+                            accent.withValues(alpha: 0.94),
+                          ],
                   ),
                 ),
               ),
               Padding(
                 padding: const EdgeInsets.all(20),
                 child: Column(
-                  crossAxisAlignment:
-                  CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 9,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: course.darkText
-                            ? AppTheme.deepBlue
-                            : Colors.white
-                            .withValues(alpha: 0.16),
-                        borderRadius:
-                        BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        course.category,
-                        style: TextStyle(
-                          color: course.darkText
-                              ? Colors.white
-                              : Colors.white,
-                          fontSize: 8,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.7,
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 9, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: course.darkText
+                                ? AppTheme.deepBlue
+                                : Colors.white.withValues(alpha: 0.16),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            course.category.toUpperCase(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 8,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.7,
+                            ),
+                          ),
                         ),
-                      ),
+                        const Spacer(),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: AppTheme.softYellow,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            course.priceLabel,
+                            style: const TextStyle(
+                              color: AppTheme.deepBlue,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const Spacer(),
                     Text(
@@ -682,20 +716,20 @@ class CoursesScreen extends StatelessWidget {
                     const SizedBox(height: 10),
                     Row(
                       children: [
-                        Text(
-                          course.modules,
-                          style: TextStyle(
-                            color: titleColor,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
+                        Expanded(
+                          child: Text(
+                            '${course.moduleCount} modules · ${course.level} · ${course.instructor}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: titleColor,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
-                        const Spacer(),
-                        Icon(
-                          Icons.arrow_forward_rounded,
-                          color: titleColor,
-                          size: 18,
-                        ),
+                        Icon(Icons.arrow_forward_rounded,
+                            color: titleColor, size: 18),
                       ],
                     ),
                   ],
@@ -707,24 +741,4 @@ class CoursesScreen extends StatelessWidget {
       ),
     );
   }
-}
-
-class _CourseData {
-  final String title;
-  final String category;
-  final String description;
-  final String image;
-  final Color accent;
-  final String modules;
-  final bool darkText;
-
-  const _CourseData({
-    required this.title,
-    required this.category,
-    required this.description,
-    required this.image,
-    required this.accent,
-    required this.modules,
-    this.darkText = false,
-  });
 }

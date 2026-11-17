@@ -1,266 +1,237 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../auth/app_user.dart';
+import '../auth/auth_provider.dart';
+import '../learning/course_models.dart';
+import '../learning/course_service.dart';
+import '../learning/lesson_view.dart';
 import '../theme/app_theme.dart';
 import 'assessment_screen.dart';
+import 'certificate_screen.dart';
 
+/// Course player. Loads the course and the learner's enrolment from Firestore
+/// and saves progress as the learner completes lessons.
 class CoursePlayerScreen extends StatefulWidget {
-  const CoursePlayerScreen({super.key});
+  final String courseId;
+  const CoursePlayerScreen({super.key, required this.courseId});
 
   @override
   State<CoursePlayerScreen> createState() => _CoursePlayerScreenState();
 }
 
 class _CoursePlayerScreenState extends State<CoursePlayerScreen> {
-  int selectedModule = 0;
-  int selectedLesson = 0;
-
-  final List<Map<String, dynamic>> modules = [
-    {
-      'title': 'Understanding Your Leadership Style',
-      'lessons': [
-        'Introduction to Leadership',
-        'Discovering Your Leadership Style',
-        'Strengths and Development Areas',
-        'Leadership Reflection',
-      ],
-    },
-    {
-      'title': 'Communication & Influence',
-      'lessons': [
-        'Effective Communication',
-        'Active Listening',
-        'Influencing Others',
-        'Building Trust',
-        'Communication Practice',
-      ],
-    },
-    {
-      'title': 'Leading Difficult Conversations',
-      'lessons': [
-        'Understanding Difficult Conversations',
-        'Preparing for Challenging Discussions',
-        'Managing Emotions',
-        'Conversation Practice',
-      ],
-    },
-    {
-      'title': 'Building High-Trust Teams',
-      'lessons': [
-        'What Makes a High-Trust Team?',
-        'Team Collaboration',
-        'Psychological Safety',
-        'Giving Feedback',
-        'Team Activity',
-      ],
-    },
-    {
-      'title': 'Decision Making & Accountability',
-      'lessons': [
-        'Making Better Decisions',
-        'Taking Ownership',
-        'Accountability in Teams',
-        'Decision-Making Practice',
-      ],
-    },
-    {
-      'title': 'From Insight to Impact',
-      'lessons': [
-        'Turning Learning into Action',
-        'Creating Your Action Plan',
-        'Final Reflection',
-      ],
-    },
-  ];
+  late final Stream<Course?> _course;
+  Stream<Enrolment?>? _enrolment;
+  int _module = 0;
+  int _lesson = 0;
+  bool _positioned = false; // set the start position only once
 
   @override
+  void initState() {
+    super.initState();
+    _course = CourseService.instance.course(widget.courseId);
+    final uid = context.read<AuthProvider>().user?.uid;
+    if (uid != null) {
+      _enrolment = CourseService.instance.enrolment(uid, widget.courseId);
+    }
+  }
+
+  void _snack(String text) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+
+  // ------------------------------------------------------------------- build
+  @override
   Widget build(BuildContext context) {
-    final currentModule = modules[selectedModule];
-    final lessons = currentModule['lessons'] as List<String>;
-    final currentLesson = lessons[selectedLesson];
+    final isStaff = context
+        .watch<AuthProvider>()
+        .hasRole([UserRole.admin, UserRole.trainer]);
+
+    return StreamBuilder<Course?>(
+      stream: _course,
+      builder: (context, courseSnap) {
+        if (courseSnap.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+              body: Center(child: CircularProgressIndicator()));
+        }
+        final course = courseSnap.data;
+        if (course == null || course.modules.isEmpty) {
+          return _simple('This course has no content yet.');
+        }
+        if (_enrolment == null) {
+          return _simple('Please sign in to open this course.');
+        }
+
+        return StreamBuilder<Enrolment?>(
+          stream: _enrolment,
+          builder: (context, enSnap) {
+            if (enSnap.connectionState == ConnectionState.waiting) {
+              return const Scaffold(
+                  body: Center(child: CircularProgressIndicator()));
+            }
+            final enrolment = enSnap.data;
+            if (enrolment == null && !isStaff) {
+              return _simple(
+                  'You are not enrolled in this course yet. Open the course page and tap Enrol.');
+            }
+
+            if (!_positioned) {
+              if (enrolment != null) {
+                _module = enrolment.lastModule.clamp(0, course.modules.length - 1);
+                _lesson = enrolment.lastLesson
+                    .clamp(0, course.modules[_module].lessons.length - 1);
+              }
+              _positioned = true;
+            }
+            return _player(course, enrolment);
+          },
+        );
+      },
+    );
+  }
+
+  Scaffold _simple(String message) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Course Player')),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(message, textAlign: TextAlign.center),
+        ),
+      ),
+    );
+  }
+
+  Widget _player(Course course, Enrolment? enrolment) {
+    final done = enrolment?.completed.toSet() ?? <String>{};
+    final total = course.lessonCount;
+    final percent = total == 0 ? 0 : ((done.length / total) * 100).round();
+    final module = course.modules[_module];
+    final lesson = module.lessons[_lesson];
+    final isDone = done.contains(lessonKey(_module, _lesson));
 
     return Scaffold(
+      backgroundColor: const Color(0xFFF7F6F9),
       appBar: AppBar(
-        title: const Text('Course Player'),
+        title: Text(course.title),
         actions: [
-          IconButton(
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Your course progress is saved.'),
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Text(
+                'Progress $percent%',
+                style: const TextStyle(
+                  color: AppTheme.deepBlue,
+                  fontWeight: FontWeight.w800,
                 ),
-              );
-            },
-            icon: const Icon(Icons.bookmark_border),
+              ),
+            ),
           ),
         ],
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
-          final isDesktop = constraints.maxWidth >= 900;
+          final desktop = constraints.maxWidth >= 900;
 
           return Row(
             children: [
-              if (isDesktop)
-                SizedBox(
-                  width: 330,
-                  child: _buildSidebar(),
-                ),
-
+              if (desktop)
+                SizedBox(width: 340, child: _sidebar(course, enrolment, done, percent)),
               Expanded(
                 child: SingleChildScrollView(
-                  padding: EdgeInsets.all(isDesktop ? 40 : 20),
+                  padding: EdgeInsets.all(desktop ? 40 : 20),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (!isDesktop) _buildMobileModuleSelector(),
-
+                      if (!desktop) _mobileModuleSelector(course, enrolment),
+                      if (enrolment == null)
+                        Container(
+                          width: double.infinity,
+                          margin: const EdgeInsets.only(bottom: 18),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppTheme.softYellow.withValues(alpha: 0.4),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Text(
+                              'Staff preview: your progress is not saved.'),
+                        ),
                       Text(
-                        'MODULE ${selectedModule + 1}',
+                        'MODULE ${_module + 1} · LESSON ${_lesson + 1} OF ${module.lessons.length}',
                         style: const TextStyle(
                           color: AppTheme.purple,
-                          fontSize: 13,
+                          fontSize: 12,
                           fontWeight: FontWeight.w800,
-                          letterSpacing: 1.2,
+                          letterSpacing: 1.1,
                         ),
                       ),
                       const SizedBox(height: 8),
-
                       Text(
-                        currentModule['title'],
-                        style: Theme.of(context)
-                            .textTheme
-                            .headlineMedium,
+                        module.title,
+                        style: Theme.of(context).textTheme.headlineMedium,
                       ),
-
-                      const SizedBox(height: 28),
-
-                      Container(
-                        width: double.infinity,
-                        height: isDesktop ? 360 : 220,
-                        decoration: BoxDecoration(
-                          color: AppTheme.deepBlue,
-                          borderRadius: BorderRadius.circular(24),
-                          image: const DecorationImage(
-                            image: AssetImage(
-                              'assets/images/leadership_discussion.png',
-                            ),
-                            fit: BoxFit.cover,
-                            opacity: 0.45,
-                          ),
-                        ),
-                        child: Center(
-                          child: Container(
-                            width: 76,
-                            height: 76,
-                            decoration: const BoxDecoration(
-                              color: AppTheme.softYellow,
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(
-                              Icons.play_arrow,
-                              color: AppTheme.deepBlue,
-                              size: 42,
-                            ),
-                          ),
+                      const SizedBox(height: 18),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: LinearProgressIndicator(
+                          value: percent / 100,
+                          minHeight: 8,
+                          backgroundColor: const Color(0xFFEDEAF4),
+                          color: AppTheme.purple,
                         ),
                       ),
-
-                      const SizedBox(height: 30),
-
+                      const SizedBox(height: 6),
+                      Text('Course Progress: $percent%',
+                          style: const TextStyle(
+                              color: AppTheme.greyText, fontSize: 12)),
+                      const SizedBox(height: 24),
                       Text(
-                        currentLesson,
+                        lesson.title,
                         style: Theme.of(context).textTheme.headlineSmall,
                       ),
-
                       const SizedBox(height: 14),
-
-                      Text(
-                        'In this lesson, you will explore practical ideas '
-                            'and activities related to leadership development. '
-                            'Work through the content at your own pace and '
-                            'complete the activities before moving forward.',
-                        style: Theme.of(context).textTheme.bodyLarge,
+                      LessonContent(
+                        lesson: lesson,
+                        posterImage: course.image,
+                        tall: desktop,
                       ),
-
-                      const SizedBox(height: 28),
-
-                      Container(
-                        padding: const EdgeInsets.all(22),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: const Color(0xFFE4E7EC),
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 46,
-                              height: 46,
-                              decoration: BoxDecoration(
-                                color: AppTheme.softYellow.withOpacity(0.3),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Icon(
-                                Icons.lightbulb_outline,
-                                color: AppTheme.deepBlue,
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment:
-                                CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Lesson Activity',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 5),
-                                  Text(
-                                    'Reflect on the key ideas from this lesson '
-                                        'and prepare for the next activity.',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodyMedium,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      const SizedBox(height: 35),
-
+                      const SizedBox(height: 30),
                       Row(
                         children: [
                           Expanded(
                             child: OutlinedButton.icon(
-                              onPressed: _previousLesson,
+                              onPressed: () => _previous(course, enrolment),
                               icon: const Icon(Icons.arrow_back),
                               label: const Text('Previous'),
                             ),
                           ),
-                          const SizedBox(width: 14),
+                          const SizedBox(width: 12),
                           Expanded(
                             child: ElevatedButton.icon(
-                              onPressed: _nextLesson,
+                              onPressed: () =>
+                                  _toggleComplete(course, enrolment),
+                              icon: Icon(isDone
+                                  ? Icons.check_circle
+                                  : Icons.check_circle_outline),
+                              label: Text(isDone ? 'Completed' : 'Mark Complete'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor:
+                                    isDone ? const Color(0xFF4C7A6B) : null,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => _next(course, enrolment),
                               icon: const Icon(Icons.arrow_forward),
-                              label: const Text('Next Lesson'),
+                              label: const Text('Next'),
                             ),
                           ),
                         ],
                       ),
-
                       const SizedBox(height: 30),
-
-                      if (selectedModule == modules.length - 1 &&
-                          selectedLesson == lessons.length - 1)
-                        _buildQuizCard(),
+                      if (percent == 100) _quizCard(course, enrolment),
                     ],
                   ),
                 ),
@@ -272,15 +243,13 @@ class _CoursePlayerScreenState extends State<CoursePlayerScreen> {
     );
   }
 
-  Widget _buildSidebar() {
+  // ----------------------------------------------------------------- sidebar
+  Widget _sidebar(
+      Course course, Enrolment? enrolment, Set<String> done, int percent) {
     return Container(
       decoration: const BoxDecoration(
         color: Colors.white,
-        border: Border(
-          right: BorderSide(
-            color: Color(0xFFE4E7EC),
-          ),
-        ),
+        border: Border(right: BorderSide(color: Color(0xFFE4E7EC))),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -298,64 +267,61 @@ class _CoursePlayerScreenState extends State<CoursePlayerScreen> {
             ),
           ),
           const Divider(height: 1),
-
           Expanded(
             child: ListView.builder(
-              itemCount: modules.length,
-              itemBuilder: (context, moduleIndex) {
-                final module = modules[moduleIndex];
-                final lessons = module['lessons'] as List<String>;
-
+              itemCount: course.modules.length,
+              itemBuilder: (context, mi) {
+                final module = course.modules[mi];
+                final moduleDone = module.lessons.isNotEmpty &&
+                    List.generate(module.lessons.length,
+                            (li) => done.contains(lessonKey(mi, li)))
+                        .every((x) => x);
                 return ExpansionTile(
-                  initiallyExpanded: moduleIndex == selectedModule,
-                  title: Text(
-                    'Module ${moduleIndex + 1}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                    ),
+                  key: PageStorageKey('module-$mi'),
+                  initiallyExpanded: mi == _module,
+                  leading: Icon(
+                    moduleDone
+                        ? Icons.check_circle
+                        : Icons.circle_outlined,
+                    color: moduleDone
+                        ? const Color(0xFF4C7A6B)
+                        : AppTheme.greyText,
+                    size: 20,
                   ),
-                  subtitle: Text(
-                    module['title'],
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  children: List.generate(
-                    lessons.length,
-                        (lessonIndex) {
-                      final isSelected =
-                          moduleIndex == selectedModule &&
-                              lessonIndex == selectedLesson;
-
-                      return ListTile(
-                        selected: isSelected,
+                  title: Text('Module ${mi + 1}',
+                      style: const TextStyle(fontWeight: FontWeight.w700)),
+                  subtitle: Text(module.title,
+                      maxLines: 2, overflow: TextOverflow.ellipsis),
+                  children: [
+                    for (var li = 0; li < module.lessons.length; li++)
+                      ListTile(
+                        selected: mi == _module && li == _lesson,
                         selectedTileColor:
-                        AppTheme.softYellow.withOpacity(0.25),
+                            AppTheme.softYellow.withValues(alpha: 0.25),
                         leading: Icon(
-                          isSelected
-                              ? Icons.play_circle
-                              : Icons.check_circle_outline,
-                          color: isSelected
-                              ? AppTheme.purple
-                              : AppTheme.greyText,
+                          done.contains(lessonKey(mi, li))
+                              ? Icons.check_circle
+                              : (mi == _module && li == _lesson
+                                  ? Icons.play_circle
+                                  : Icons.radio_button_unchecked),
+                          color: done.contains(lessonKey(mi, li))
+                              ? const Color(0xFF4C7A6B)
+                              : (mi == _module && li == _lesson
+                                  ? AppTheme.purple
+                                  : AppTheme.greyText),
                         ),
                         title: Text(
-                          lessons[lessonIndex],
+                          module.lessons[li].title,
                           style: TextStyle(
                             fontSize: 13,
-                            fontWeight: isSelected
+                            fontWeight: mi == _module && li == _lesson
                                 ? FontWeight.w700
                                 : FontWeight.w400,
                           ),
                         ),
-                        onTap: () {
-                          setState(() {
-                            selectedModule = moduleIndex;
-                            selectedLesson = lessonIndex;
-                          });
-                        },
-                      );
-                    },
-                  ),
+                        onTap: () => _goTo(course, enrolment, mi, li),
+                      ),
+                  ],
                 );
               },
             ),
@@ -365,41 +331,35 @@ class _CoursePlayerScreenState extends State<CoursePlayerScreen> {
     );
   }
 
-  Widget _buildMobileModuleSelector() {
+  Widget _mobileModuleSelector(Course course, Enrolment? enrolment) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 25),
-      padding: const EdgeInsets.all(18),
+      margin: const EdgeInsets.only(bottom: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<int>(
-          value: selectedModule,
+          value: _module,
           isExpanded: true,
-          items: List.generate(
-            modules.length,
-                (index) => DropdownMenuItem(
-              value: index,
-              child: Text(
-                'Module ${index + 1}: ${modules[index]['title']}',
+          items: [
+            for (var i = 0; i < course.modules.length; i++)
+              DropdownMenuItem(
+                value: i,
+                child: Text('Module ${i + 1}: ${course.modules[i].title}',
+                    overflow: TextOverflow.ellipsis),
               ),
-            ),
-          ),
-          onChanged: (value) {
-            if (value == null) return;
-
-            setState(() {
-              selectedModule = value;
-              selectedLesson = 0;
-            });
+          ],
+          onChanged: (v) {
+            if (v != null) _goTo(course, enrolment, v, 0);
           },
         ),
       ),
     );
   }
 
-  Widget _buildQuizCard() {
+  Widget _quizCard(Course course, Enrolment? enrolment) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
@@ -410,14 +370,10 @@ class _CoursePlayerScreenState extends State<CoursePlayerScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(
-            Icons.quiz_outlined,
-            color: AppTheme.softYellow,
-            size: 32,
-          ),
+          const Icon(Icons.quiz_outlined, color: AppTheme.softYellow, size: 32),
           const SizedBox(height: 14),
           const Text(
-            'Ready for the assessment?',
+            'All lessons complete. Ready for the assessment?',
             style: TextStyle(
               color: Colors.white,
               fontSize: 20,
@@ -426,84 +382,110 @@ class _CoursePlayerScreenState extends State<CoursePlayerScreen> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Complete the course assessment to test your understanding.',
-            style: TextStyle(
-              color: Colors.white70,
-              height: 1.5,
-            ),
+            'Complete the course assessment to test your understanding and earn your certificate.',
+            style: TextStyle(color: Colors.white70, height: 1.5),
           ),
           const SizedBox(height: 20),
           ElevatedButton(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const AssessmentScreen(),
-                ),
-              );
-            },
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) =>
+                    AssessmentScreen(course: course, enrolment: enrolment),
+              ),
+            ),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.softYellow,
               foregroundColor: AppTheme.deepBlue,
             ),
-            child: const Text('Start Assessment'),
+            child: Text(enrolment?.passed == true
+                ? 'Retake Assessment'
+                : 'Start Assessment'),
           ),
+          if (enrolment != null &&
+              enrolment.passed &&
+              enrolment.certificateId.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      CertificateScreen(certificateId: enrolment.certificateId),
+                ),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Colors.white54),
+              ),
+              icon: const Icon(Icons.workspace_premium),
+              label: Text('View Certificate (best score ${enrolment.bestScore}%)'),
+            ),
+          ],
         ],
       ),
     );
   }
 
-  void _nextLesson() {
-    final lessons = modules[selectedModule]['lessons'] as List<String>;
-
-    if (selectedLesson < lessons.length - 1) {
-      setState(() {
-        selectedLesson++;
-      });
-      return;
-    }
-
-    if (selectedModule < modules.length - 1) {
-      setState(() {
-        selectedModule++;
-        selectedLesson = 0;
-      });
-      return;
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'You have reached the end of the course.',
-        ),
-      ),
+  // ----------------------------------------------------------------- actions
+  Future<void> _save(Course course, Enrolment enrolment, List<String> done,
+      {int? module, int? lesson}) {
+    return CourseService.instance.saveProgress(
+      id: enrolment.id,
+      completed: done,
+      totalLessons: course.lessonCount,
+      lastModule: module ?? _module,
+      lastLesson: lesson ?? _lesson,
+      learningHours: course.minutesFor(done) / 60.0,
     );
   }
 
-  void _previousLesson() {
-    if (selectedLesson > 0) {
-      setState(() {
-        selectedLesson--;
-      });
+  Future<void> _toggleComplete(Course course, Enrolment? enrolment) async {
+    if (enrolment == null) {
+      _snack('Preview mode: progress is not saved.');
       return;
     }
-
-    if (selectedModule > 0) {
-      final previousModule = selectedModule - 1;
-      final lessons =
-      modules[previousModule]['lessons'] as List<String>;
-
-      setState(() {
-        selectedModule = previousModule;
-        selectedLesson = lessons.length - 1;
-      });
-      return;
+    final done = enrolment.completed.toSet();
+    final key = lessonKey(_module, _lesson);
+    if (!done.add(key)) done.remove(key);
+    try {
+      await _save(course, enrolment, done.toList());
+    } catch (e) {
+      debugPrint('Save progress failed: $e');
+      if (mounted) _snack('Could not save your progress. Please try again.');
     }
+  }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('You are already at the first lesson.'),
-      ),
-    );
+  void _goTo(Course course, Enrolment? enrolment, int module, int lesson) {
+    setState(() {
+      _module = module;
+      _lesson = lesson;
+    });
+    if (enrolment != null) {
+      _save(course, enrolment, enrolment.completed, module: module, lesson: lesson)
+          .catchError((Object e) => debugPrint('Save position failed: $e'));
+    }
+  }
+
+  void _next(Course course, Enrolment? enrolment) {
+    final lessons = course.modules[_module].lessons;
+    if (_lesson < lessons.length - 1) {
+      _goTo(course, enrolment, _module, _lesson + 1);
+    } else if (_module < course.modules.length - 1) {
+      _goTo(course, enrolment, _module + 1, 0);
+    } else {
+      _snack('You have reached the end of the course.');
+    }
+  }
+
+  void _previous(Course course, Enrolment? enrolment) {
+    if (_lesson > 0) {
+      _goTo(course, enrolment, _module, _lesson - 1);
+    } else if (_module > 0) {
+      final prev = _module - 1;
+      _goTo(course, enrolment, prev, course.modules[prev].lessons.length - 1);
+    } else {
+      _snack('You are already at the first lesson.');
+    }
   }
 }

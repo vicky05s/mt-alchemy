@@ -1,6 +1,13 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../auth/app_user.dart';
+import '../auth/auth_provider.dart';
+import '../auth/role_gate.dart';
 import '../theme/app_theme.dart';
+import '../widgets/cart_badge_button.dart';
+import 'admin_screen.dart';
+import 'cart_screen.dart';
 import 'courses_screen.dart';
 import 'login_screen.dart';
 import 'register_screen.dart';
@@ -9,8 +16,7 @@ import 'about_screen.dart';
 import 'services_screen.dart';
 import 'insights_screen.dart';
 import 'contact_screen.dart';
-import 'corporate_screen.dart';
-import 'course_player_screen.dart';
+import 'organizations_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -36,6 +42,12 @@ class _HomeScreenState extends State<HomeScreen>
   void dispose() {
     _orbitController.dispose();
     super.dispose();
+  }
+
+  /// Opens a page, then refreshes this screen (cart badge, login state).
+  Future<void> _open(Widget page) async {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => page));
+    if (mounted) setState(() {});
   }
 
   @override
@@ -72,6 +84,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   PreferredSizeWidget _appBar(BuildContext context) {
     final desktop = MediaQuery.sizeOf(context).width >= 900;
+    final auth = context.watch<AuthProvider>();
 
     return AppBar(
       backgroundColor: const Color(0xFFF7F6F9),
@@ -106,76 +119,14 @@ class _HomeScreenState extends State<HomeScreen>
         if (desktop) ...[
           _navItem('About'),
           _navItem('Services'),
-          _navItem('Learn'),
-          _navItem('Develop'),
+          _navItem('Upskilling'),
           _navItem('Store'),
           _navItem('Insights'),
           _navItem('Contact'),
           const SizedBox(width: 8),
-          TextButton(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const LoginScreen(),
-                ),
-              );
-            },
-            style: TextButton.styleFrom(
-              backgroundColor: AppTheme.deepBlue,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(
-                horizontal: 18,
-                vertical: 11,
-              ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(13),
-              ),
-            ),
-            child: const Text(
-              'Sign in',
-              style: TextStyle(fontWeight: FontWeight.w700),
-            ),
-          ),
-          const SizedBox(width: 8),
-          TextButton(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const RegisterScreen(),
-                ),
-              );
-            },
-            style: TextButton.styleFrom(
-              foregroundColor: AppTheme.deepBlue,
-              padding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 11,
-              ),
-              shape: RoundedRectangleBorder(
-                side: const BorderSide(color: AppTheme.deepBlue),
-                borderRadius: BorderRadius.circular(13),
-              ),
-            ),
-            child: const Text(
-              'Register',
-              style: TextStyle(fontWeight: FontWeight.w700),
-            ),
-          ),
+          ..._authActions(auth),
         ],
-        IconButton(
-          tooltip: 'Open Store',
-          onPressed: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => const StoreScreen(),
-              ),
-            );
-          },
-          icon: const Icon(Icons.shopping_bag_outlined),
-        ),
+        CartBadgeButton(onPressed: () => _open(const CartScreen())),
         const SizedBox(width: 8),
       ],
     );
@@ -186,19 +137,16 @@ class _HomeScreenState extends State<HomeScreen>
       padding: const EdgeInsets.symmetric(horizontal: 7),
       child: TextButton(
         onPressed: () {
-          Widget? page;
-          switch (title) {
-            case 'About': page = const AboutScreen(); break;
-            case 'Learn':
-            case 'Develop': page = const CoursesScreen(); break;
-            case 'Store': page = const StoreScreen(); break;
-            case 'Insights': page = const InsightsScreen(); break;
-            case 'Services': page = const ServicesScreen(); break;
-            case 'Contact': page = const ContactScreen(); break;
-          }
-          if (page != null) {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => page!));
-          }
+          final Widget? page = switch (title) {
+            'About' => const AboutScreen(),
+            'Services' => const ServicesScreen(),
+            'Upskilling' => const CoursesScreen(),
+            'Store' => const StoreScreen(),
+            'Insights' => const InsightsScreen(),
+            'Contact' => const ContactScreen(),
+            _ => null,
+          };
+          if (page != null) _open(page);
         },
         child: Text(
           title,
@@ -210,6 +158,181 @@ class _HomeScreenState extends State<HomeScreen>
       ),
     );
   }
+
+  // ---- login state in the header -------------------------------------------
+
+  List<Widget> _authActions(AuthProvider auth) {
+    if (auth.isInitialising) return const [SizedBox(width: 8)];
+    if (auth.isLoggedIn) return [_accountMenu(auth), const SizedBox(width: 8)];
+
+    return [
+      TextButton(
+        onPressed: () => _open(const LoginScreen()),
+        style: TextButton.styleFrom(
+          backgroundColor: AppTheme.deepBlue,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(13),
+          ),
+        ),
+        child: const Text(
+          'Sign in',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+      ),
+      const SizedBox(width: 8),
+      TextButton(
+        onPressed: () => _open(const RegisterScreen()),
+        style: TextButton.styleFrom(
+          foregroundColor: AppTheme.deepBlue,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+          shape: RoundedRectangleBorder(
+            side: const BorderSide(color: AppTheme.deepBlue),
+            borderRadius: BorderRadius.circular(13),
+          ),
+        ),
+        child: const Text(
+          'Register',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+      ),
+    ];
+  }
+
+  String _roleLabel(String role) {
+    switch (role) {
+      case UserRole.individual:
+        return 'Individual Learner';
+      case UserRole.employer:
+        return 'Employer';
+      case UserRole.trainer:
+        return 'Trainer';
+      case UserRole.admin:
+        return 'Administrator';
+      default:
+        return 'Guest';
+    }
+  }
+
+  Widget _accountMenu(AuthProvider auth) {
+    final user = auth.user!;
+    final trimmed = user.name.trim();
+    final first = trimmed.isEmpty ? 'Account' : trimmed.split(' ').first;
+
+    return PopupMenuButton<String>(
+      tooltip: 'Account',
+      offset: const Offset(0, 48),
+      onSelected: _onAccountAction,
+      itemBuilder: (_) => [
+        PopupMenuItem<String>(
+          enabled: false,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                trimmed.isEmpty ? 'Account' : trimmed,
+                style: const TextStyle(
+                  color: AppTheme.darkText,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              Text(
+                user.email,
+                style: const TextStyle(color: AppTheme.greyText, fontSize: 12),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _roleLabel(user.role),
+                style: const TextStyle(
+                  color: AppTheme.purple,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+        if (user.role == UserRole.individual)
+          const PopupMenuItem<String>(
+              value: 'learning', child: Text('My Learning')),
+        if (user.role == UserRole.employer)
+          const PopupMenuItem<String>(
+              value: 'employer', child: Text('Employer Dashboard')),
+        if (user.role == UserRole.admin)
+          const PopupMenuItem<String>(
+              value: 'admin', child: Text('Admin Portal')),
+        if (user.role == UserRole.trainer)
+          const PopupMenuItem<String>(
+              value: 'admin', child: Text('Trainer Portal')),
+        const PopupMenuDivider(),
+        const PopupMenuItem<String>(value: 'logout', child: Text('Log out')),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(13),
+          border: Border.all(color: const Color(0xFFE4E0E9)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(
+              radius: 14,
+              backgroundColor: AppTheme.deepBlue,
+              child: Text(
+                first[0].toUpperCase(),
+                style: const TextStyle(
+                  color: AppTheme.softYellow,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              first,
+              style: const TextStyle(
+                color: AppTheme.darkText,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const Icon(Icons.arrow_drop_down, color: AppTheme.greyText),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _onAccountAction(String value) async {
+    switch (value) {
+      case 'learning':
+        _open(const CoursesScreen());
+        break;
+      case 'employer':
+        _open(const RoleGate(
+          allowed: [UserRole.employer, UserRole.admin],
+          child: OrganizationsScreen(),
+        ));
+        break;
+      case 'admin':
+        _open(const RoleGate(
+          allowed: [UserRole.admin, UserRole.trainer],
+          child: AdminScreen(),
+        ));
+        break;
+      case 'logout':
+        await context.read<AuthProvider>().logout();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('You have been signed out.')),
+        );
+        break;
+    }
+  }
+
   Widget _desktopHome(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -575,9 +698,9 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
                 TextButton(
                   onPressed: () {
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => const CoursePlayerScreen()));
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const CoursesScreen()));
                   },
-                  child: const Text('Continue →'),
+                  child: const Text('Explore courses →'),
                 ),
               ],
             ),
@@ -918,7 +1041,7 @@ class _HomeScreenState extends State<HomeScreen>
                       const SizedBox(height: 18),
                       OutlinedButton(
                         onPressed: () {
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => const CorporateScreen()));
+                          Navigator.push(context, MaterialPageRoute(builder: (_) => const OrganizationsScreen()));
                         },
                         style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.white,
@@ -1095,13 +1218,16 @@ class _HomeScreenState extends State<HomeScreen>
       context: context,
       showDragHandle: true,
       builder: (sheetContext) {
+        final auth = context.read<AuthProvider>();
         final items = <(String, IconData, Widget)>[
           ('About', Icons.info_outline, const AboutScreen()),
           ('Services', Icons.auto_awesome_outlined, const ServicesScreen()),
-          ('Corporate Learning', Icons.business_outlined, const CorporateScreen()),
+          ('Organizations', Icons.business_outlined, const OrganizationsScreen()),
           ('Contact', Icons.mail_outline, const ContactScreen()),
-          ('Login', Icons.login_rounded, const LoginScreen()),
-          ('Register', Icons.person_add_alt_1_rounded, const RegisterScreen()),
+          if (!auth.isLoggedIn)
+            ('Login', Icons.login_rounded, const LoginScreen()),
+          if (!auth.isLoggedIn)
+            ('Register', Icons.person_add_alt_1_rounded, const RegisterScreen()),
         ];
         return SafeArea(
           child: ListView(
@@ -1118,9 +1244,21 @@ class _HomeScreenState extends State<HomeScreen>
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () {
                   Navigator.pop(sheetContext);
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => item.$3));
+                  _open(item.$3);
                 },
               )),
+              if (auth.isLoggedIn) ...[
+                const Divider(),
+                ListTile(
+                  leading:
+                      const Icon(Icons.logout_rounded, color: AppTheme.purple),
+                  title: Text('Log out (${auth.user?.name ?? ''})'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    auth.logout();
+                  },
+                ),
+              ],
             ],
           ),
         );
@@ -1143,7 +1281,7 @@ class _HomeScreenState extends State<HomeScreen>
             return;
           default: return;
         }
-        Navigator.push(context, MaterialPageRoute(builder: (_) => page!));
+        _open(page!);
       },
       destinations: const [
         NavigationDestination(
@@ -1154,7 +1292,7 @@ class _HomeScreenState extends State<HomeScreen>
         NavigationDestination(
           icon: Icon(Icons.school_outlined),
           selectedIcon: Icon(Icons.school_rounded),
-          label: 'Learn',
+          label: 'Upskilling',
         ),
         NavigationDestination(
           icon: Icon(Icons.storefront_outlined),
